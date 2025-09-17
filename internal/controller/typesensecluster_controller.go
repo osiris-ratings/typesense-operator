@@ -18,7 +18,9 @@ package controller
 
 import (
 	"context"
-	"fmt"
+	"strings"
+	"time"
+
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	"golang.org/x/text/cases"
@@ -33,8 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"strings"
-	"time"
 
 	tsv1alpha1 "github.com/akyriako/typesense-operator/api/v1alpha1"
 )
@@ -68,8 +68,9 @@ var (
 			return !e.DeleteStateUnknown
 		},
 	})
-
-	requeueAfter = time.Second * 30
+	// kubelets sync configmaps by default every minute so let's wait for 2 minutes
+	configMapRequeuePeriod = 2 * time.Minute
+	reconcileRequeuePeriod = 60 * time.Second
 )
 
 // +kubebuilder:rbac:groups=ts.opentelekomcloud.com,resources=typesenseclusters,verbs=get;list;watch;create;update;patch;delete
@@ -123,7 +124,7 @@ func (r *TypesenseClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Update strategy: Update the existing object, if changes are identified in the desired.Data["nodes"]
-	updated, err := r.ReconcileConfigMap(ctx, ts)
+	configMapUpdated, err := r.ReconcileConfigMap(ctx, ts)
 	if err != nil {
 		cerr := r.setConditionNotReady(ctx, &ts, ConditionReasonConfigMapNotReady, err)
 		if cerr != nil {
@@ -173,7 +174,6 @@ func (r *TypesenseClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Update strategy: Update the whole specs when changes are identified
-	// Update the whole specs when changes are identified
 	sts, err := r.ReconcileStatefulSet(ctx, &ts)
 	if err != nil {
 		cerr := r.setConditionNotReady(ctx, &ts, ConditionReasonStatefulSetNotReady, err)
@@ -189,7 +189,17 @@ func (r *TypesenseClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	cond := ConditionReasonQuorumStateUnknown
-	if *updated {
+	// anytime a configmap is updated, we should force the pods to read it via an annotation bump
+	// and wait without reconciling quorum to avoid catching the nodes as they are updating
+	if configMapUpdated {
+		r.logger.Info("config map updated", "configmap", ts.Name)
+		err = r.ForcePodsConfigMapUpdate(ctx, &ts)
+		if err != nil {
+			r.logger.Error(err, "failed to force pods configmap update", "configmap", ts.Name)
+		}
+		r.logger.Info("requeueing to give cluster time to read new nodes", "requeueAfter", configMapRequeuePeriod)
+		return ctrl.Result{RequeueAfter: configMapRequeuePeriod}, nil
+	} else {
 		condition, _, err := r.ReconcileQuorum(ctx, &ts, secret, client.ObjectKeyFromObject(sts))
 		if err != nil {
 			r.logger.Error(err, "reconciling quorum health failed")
@@ -240,14 +250,9 @@ func (r *TypesenseClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		cond = condition
 	}
 
-	lastAction := "bootstrapping"
-	if *updated {
-		lastAction = "reconciling"
-	}
-	requeueAfter = time.Duration(60+terminationGracePeriodSeconds) * time.Second
-	r.logger.Info(fmt.Sprintf("%s cluster completed", lastAction), "condition", cond, "requeueAfter", requeueAfter)
-
-	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	rqa := reconcileRequeuePeriod + (time.Duration(terminationGracePeriodSeconds) * time.Second)
+	r.logger.Info("reconciling cluster completed", "condition", cond, "requeueAfter", rqa)
+	return ctrl.Result{RequeueAfter: rqa}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
