@@ -192,7 +192,7 @@ func (r *TypesenseClusterReconciler) buildStatefulSet(ctx context.Context, key c
 						FSGroup:      ptr.To[int64](2000),
 						RunAsGroup:   ptr.To[int64](3000),
 						RunAsNonRoot: ptr.To[bool](true)},
-					TerminationGracePeriodSeconds: ptr.To[int64](5),
+					TerminationGracePeriodSeconds: ptr.To[int64](10),
 					ReadinessGates: []corev1.PodReadinessGate{
 						{
 							ConditionType: QuorumReadinessGateCondition,
@@ -272,7 +272,7 @@ func (r *TypesenseClusterReconciler) buildStatefulSet(ctx context.Context, key c
 							Lifecycle: &corev1.Lifecycle{
 								PreStop: &corev1.LifecycleHandler{
 									Sleep: &corev1.SleepAction{
-										Seconds: 10,
+										Seconds: 7,
 									},
 								},
 							},
