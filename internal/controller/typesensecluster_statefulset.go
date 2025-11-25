@@ -5,6 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
 	tsv1alpha1 "github.com/akyriako/typesense-operator/api/v1alpha1"
 	"github.com/mitchellh/hashstructure/v2"
 	appsv1 "k8s.io/api/apps/v1"
@@ -15,9 +19,6 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"strconv"
-	"strings"
-	"time"
 )
 
 const (
@@ -191,7 +192,7 @@ func (r *TypesenseClusterReconciler) buildStatefulSet(ctx context.Context, key c
 						FSGroup:      ptr.To[int64](2000),
 						RunAsGroup:   ptr.To[int64](3000),
 						RunAsNonRoot: ptr.To[bool](true)},
-					TerminationGracePeriodSeconds: ptr.To[int64](5),
+					TerminationGracePeriodSeconds: ptr.To[int64](10),
 					ReadinessGates: []corev1.PodReadinessGate{
 						{
 							ConditionType: QuorumReadinessGateCondition,
@@ -266,6 +267,15 @@ func (r *TypesenseClusterReconciler) buildStatefulSet(ctx context.Context, key c
 								{
 									MountPath: "/usr/share/typesense/data",
 									Name:      "data",
+								},
+							},
+							// typesense exits immediately most times but services/ingresses can take time to propagate the fact a pod is going down
+							// this gives 7s for the kubernetes cluster to sync the fact a pod is going away before sending a sigterm
+							Lifecycle: &corev1.Lifecycle{
+								PreStop: &corev1.LifecycleHandler{
+									Sleep: &corev1.SleepAction{
+										Seconds: 7,
+									},
 								},
 							},
 						},

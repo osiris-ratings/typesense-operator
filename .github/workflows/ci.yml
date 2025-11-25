@@ -1,0 +1,40 @@
+---
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Download dependencies
+        run: go mod download
+      - name: Build binary
+        env:
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p bin
+          go build -a -o bin/manager cmd/main.go
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manager-binary
+          path: bin/manager
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
