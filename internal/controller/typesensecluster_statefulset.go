@@ -271,8 +271,8 @@ func (r *TypesenseClusterReconciler) buildStatefulSet(ctx context.Context, key c
 							},
 							Lifecycle: &corev1.Lifecycle{
 								PreStop: &corev1.LifecycleHandler{
-									Exec: &corev1.ExecAction{
-										Command: []string{"sh", "-c", "sleep", "10"},
+									Sleep: &corev1.SleepAction{
+										Seconds: 10,
 									},
 								},
 							},
